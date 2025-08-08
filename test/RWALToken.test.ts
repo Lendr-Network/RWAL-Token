@@ -16,7 +16,6 @@ describe("RWAL Token Contract", function () {
     const MINTER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("MINTER_ROLE"));
     const BURNER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("BURNER_ROLE"));
     const UPGRADER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("UPGRADER_ROLE"));
-    const BRIDGE_ROLE = ethers.keccak256(ethers.toUtf8Bytes("BRIDGE_ROLE"));
     const EMERGENCY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("EMERGENCY_ROLE"));
     const ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
     const DEFAULT_ADMIN_ROLE = ethers.ZeroHash;
@@ -71,7 +70,6 @@ describe("RWAL Token Contract", function () {
             expect(await rwal.hasRole(MINTER_ROLE, owner.address)).to.be.true;
             expect(await rwal.hasRole(BURNER_ROLE, owner.address)).to.be.true;
             expect(await rwal.hasRole(UPGRADER_ROLE, owner.address)).to.be.true;
-            expect(await rwal.hasRole(BRIDGE_ROLE, owner.address)).to.be.true;
             expect(await rwal.hasRole(ADMIN_ROLE, owner.address)).to.be.true;
             expect(await rwal.hasRole(EMERGENCY_ROLE, owner.address)).to.be.true;
         });

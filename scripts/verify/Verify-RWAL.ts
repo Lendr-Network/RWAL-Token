@@ -1,9 +1,12 @@
 import { ethers, upgrades, network } from "hardhat";
 import { run } from "hardhat";
+import * as dotenv from "dotenv";
+dotenv.config();
+
 
 // Fill these with your actual deployed addresses from deployment summary:
-const ERC20_PROXY_ADDRESS = "0xDaa939552Eb116b341DCB2feb58DaD98814449a9";      
-const BURN_MINT_TOKEN_POOL_ADDRESS = "0x8dFe088cDA43A54B8200Ab94aC5B7C93C55a6298"; 
+const ERC20_PROXY_ADDRESS = process.env.RWAL_TOKEN_BSC;      
+const BURN_MINT_TOKEN_POOL_ADDRESS = process.env.RWAL_POOL_BSC; 
 
 // Network-specific configuration (matching your deployment script)
 const getNetworkConfig = () => {

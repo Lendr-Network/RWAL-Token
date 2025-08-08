@@ -10,7 +10,6 @@ import {UUPSUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgrad
 import {ERC20VotesUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import {ERC20Upgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/token/ERC20/ERC20Upgradeable.sol";
 import {PausableUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/utils/PausableUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IAccessControl} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contracts/access/IAccessControl.sol";
 import {IERC20} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contracts/interfaces/IERC20.sol";
 import {IERC165} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contracts/utils/introspection/IERC165.sol";
@@ -26,7 +25,6 @@ contract RWAL is
     IERC165,
     ERC20VotesUpgradeable,
     PausableUpgradeable,
-    ReentrancyGuardUpgradeable,
     AccessControlDefaultAdminRulesUpgradeable
 {
     // ================================================================
@@ -34,7 +32,7 @@ contract RWAL is
     // ================================================================
 
     /// @dev Maximum supply of RWAL tokens (100M)
-    uint256 public constant MAX_SUPPLY = 100_000_000e18;
+    uint256 private constant MAX_SUPPLY = 100_000_000e18; //private
 
     // ================================================================
     // │                            ROLES                             │
@@ -43,15 +41,15 @@ contract RWAL is
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
-    bytes32 public constant BRIDGE_ROLE = keccak256("BRIDGE_ROLE");
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     // ================================================================
     // │                           ERRORS                             │
     // ================================================================
-
-    error RWAL__MaxSupplyExceeded(uint256 supplyAfterMint);
+    
+    // check the flow
+    error RWAL__MaxSupplyExceeded(uint256 supplyAfterMint); 
     error RWAL__InvalidRecipient(address recipient);
     error RWAL__ZeroAmount();
     error RWAL__ZeroAddress();
@@ -117,7 +115,6 @@ contract RWAL is
         __ERC20_init(name, symbol);
         __EIP712_init(name, "1");
         __Pausable_init();
-        __ReentrancyGuard_init();
         __AccessControlDefaultAdminRules_init(0, admin);
         __UUPSUpgradeable_init();
 
@@ -127,7 +124,6 @@ contract RWAL is
         _grantRole(MINTER_ROLE, admin);
         _grantRole(BURNER_ROLE, admin);
         _grantRole(UPGRADER_ROLE, admin);
-        _grantRole(BRIDGE_ROLE, admin);
         _grantRole(ADMIN_ROLE, admin);
         _grantRole(EMERGENCY_ROLE, admin);
 
