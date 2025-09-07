@@ -31,8 +31,8 @@ contract RWAL is
     // │                           CONSTANTS                          │
     // ================================================================
 
-    /// @dev Maximum supply of RWAL tokens (100M)
-    uint256 private constant MAX_SUPPLY = 100_000_000e18; //private
+    /// @dev Maximum supply of RWAL tokens (1B)
+    uint256 private constant MAX_SUPPLY = 1_000_000_000e18; //private
 
     // ================================================================
     // │                            ROLES                             │
