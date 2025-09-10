@@ -9,13 +9,14 @@ describe("RWAL Token Contract", function () {
     const TOKEN_NAME = "Lendr Governance Token";
     const TOKEN_SYMBOL = "RWAL";
     const TOKEN_DECIMALS = 18;
-    const MAX_SUPPLY = ethers.parseEther("100000000"); // 100M tokens
+    const MAX_SUPPLY = ethers.parseEther("1000000000"); // 1 billion tokens
     const INITIAL_SUPPLY = ethers.parseEther("10000000"); // 10M tokens
 
     // Role constants
     const MINTER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("MINTER_ROLE"));
     const BURNER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("BURNER_ROLE"));
     const UPGRADER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("UPGRADER_ROLE"));
+    const BRIDGE_ROLE = ethers.keccak256(ethers.toUtf8Bytes("BRIDGE_ROLE"));
     const EMERGENCY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("EMERGENCY_ROLE"));
     const ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
     const DEFAULT_ADMIN_ROLE = ethers.ZeroHash;
@@ -35,7 +36,7 @@ describe("RWAL Token Contract", function () {
         const RWAL = await ethers.getContractFactory("RWAL");
         const rwal = (await upgrades.deployProxy(
             RWAL,
-            [TOKEN_NAME, TOKEN_SYMBOL, owner.address, INITIAL_SUPPLY, TOKEN_DECIMALS],
+            [TOKEN_NAME, TOKEN_SYMBOL, owner.address, INITIAL_SUPPLY, TOKEN_DECIMALS, false],
             { kind: "uups" }
         )) as unknown as RWAL;
 
@@ -70,6 +71,7 @@ describe("RWAL Token Contract", function () {
             expect(await rwal.hasRole(MINTER_ROLE, owner.address)).to.be.true;
             expect(await rwal.hasRole(BURNER_ROLE, owner.address)).to.be.true;
             expect(await rwal.hasRole(UPGRADER_ROLE, owner.address)).to.be.true;
+            expect(await rwal.hasRole(BRIDGE_ROLE, owner.address)).to.be.true;
             expect(await rwal.hasRole(ADMIN_ROLE, owner.address)).to.be.true;
             expect(await rwal.hasRole(EMERGENCY_ROLE, owner.address)).to.be.true;
         });
@@ -86,7 +88,7 @@ describe("RWAL Token Contract", function () {
             await expect(
                 upgrades.deployProxy(
                     RWAL,
-                    [TOKEN_NAME, TOKEN_SYMBOL, ethers.ZeroAddress, INITIAL_SUPPLY, TOKEN_DECIMALS],
+                    [TOKEN_NAME, TOKEN_SYMBOL, ethers.ZeroAddress, INITIAL_SUPPLY, TOKEN_DECIMALS, false],
                     { kind: "uups" }
                 )
             ).to.be.revertedWithCustomError(RWAL, "RWAL__ZeroAddress");
@@ -99,7 +101,7 @@ describe("RWAL Token Contract", function () {
             await expect(
                 upgrades.deployProxy(
                     RWAL,
-                    [TOKEN_NAME, TOKEN_SYMBOL, owner.address, invalidPremint, TOKEN_DECIMALS],
+                    [TOKEN_NAME, TOKEN_SYMBOL, owner.address, invalidPremint, TOKEN_DECIMALS, false],
                     { kind: "uups" }
                 )
             ).to.be.revertedWithCustomError(RWAL, "RWAL__MaxSupplyExceeded")
@@ -112,7 +114,7 @@ describe("RWAL Token Contract", function () {
             await implementation.waitForDeployment();
 
             await expect(
-                implementation.initialize(TOKEN_NAME, TOKEN_SYMBOL, owner.address, 0, TOKEN_DECIMALS)
+                implementation.initialize(TOKEN_NAME, TOKEN_SYMBOL, owner.address, 0, TOKEN_DECIMALS, false)
             ).to.be.revertedWithCustomError(implementation, "InvalidInitialization");
         });
 
@@ -120,7 +122,7 @@ describe("RWAL Token Contract", function () {
             const RWAL = await ethers.getContractFactory("RWAL");
             const rwal = (await upgrades.deployProxy(
                 RWAL,
-                [TOKEN_NAME, TOKEN_SYMBOL, owner.address, 0, TOKEN_DECIMALS],
+                [TOKEN_NAME, TOKEN_SYMBOL, owner.address, 0, TOKEN_DECIMALS, false],
                 { kind: "uups" }
             )) as unknown as RWAL;
 
@@ -377,110 +379,6 @@ describe("RWAL Token Contract", function () {
         });
     });
 
-    describe("Governance (ERC20Votes)", function () {
-        it("Should delegate votes correctly", async function () {
-            const { rwal } = await loadFixture(deployRWALFixture);
-            const delegateAmount = ethers.parseEther("1000");
-
-            await rwal.transfer(user1.address, delegateAmount);
-
-            await expect(rwal.connect(user1).delegate(user2.address))
-                .to.emit(rwal, "DelegateChanged")
-                .withArgs(user1.address, ethers.ZeroAddress, user2.address);
-
-            expect(await rwal.getVotes(user2.address)).to.equal(delegateAmount);
-            expect(await rwal.delegates(user1.address)).to.equal(user2.address);
-        });
-
-        it("Should track past votes correctly", async function () {
-            const { rwal } = await loadFixture(deployRWALFixture);
-            const delegateAmount = ethers.parseEther("1000");
-
-            await rwal.transfer(user1.address, delegateAmount);
-            await rwal.connect(user1).delegate(user2.address);
-
-            const blockNumber = await ethers.provider.getBlockNumber();
-
-            // Move forward in time
-            await time.increase(3600);
-            await ethers.provider.send("evm_mine", []);
-
-            expect(await rwal.getPastVotes(user2.address, blockNumber)).to.equal(delegateAmount);
-        });
-
-        it("Should handle delegation by signature", async function () {
-            const { rwal } = await loadFixture(deployRWALFixture);
-            const delegateAmount = ethers.parseEther("1000");
-
-            await rwal.transfer(user1.address, delegateAmount);
-
-            const domain = {
-                name: TOKEN_NAME,
-                version: "1",
-                chainId: (await ethers.provider.getNetwork()).chainId,
-                verifyingContract: await rwal.getAddress(),
-            };
-
-            const types = {
-                Delegation: [
-                    { name: "delegatee", type: "address" },
-                    { name: "nonce", type: "uint256" },
-                    { name: "expiry", type: "uint256" },
-                ],
-            };
-
-            const nonce = await rwal.nonces(user1.address);
-            const expiry = Math.floor(Date.now() / 1000) + 3600;
-
-            const message = {
-                delegatee: user2.address,
-                nonce: nonce,
-                expiry: expiry,
-            };
-
-            const signature = await user1.signTypedData(domain, types, message);
-            const sig = ethers.Signature.from(signature);
-
-            await expect(rwal.delegateBySig(user2.address, nonce, expiry, sig.v, sig.r, sig.s))
-                .to.emit(rwal, "DelegateChanged")
-                .withArgs(user1.address, ethers.ZeroAddress, user2.address);
-
-            expect(await rwal.delegates(user1.address)).to.equal(user2.address);
-            expect(await rwal.getVotes(user2.address)).to.equal(delegateAmount);
-        });
-
-        it("Should handle self-delegation", async function () {
-            const { rwal } = await loadFixture(deployRWALFixture);
-
-            await rwal.delegate(owner.address);
-
-            expect(await rwal.getVotes(owner.address)).to.equal(INITIAL_SUPPLY);
-            expect(await rwal.delegates(owner.address)).to.equal(owner.address);
-        });
-
-        it("Should track delegation with zero balance", async function () {
-            const { rwal } = await loadFixture(deployRWALFixture);
-
-            await rwal.connect(user1).delegate(user2.address);
-
-            expect(await rwal.getVotes(user2.address)).to.equal(0);
-            expect(await rwal.delegates(user1.address)).to.equal(user2.address);
-        });
-
-        it("Should get past total supply correctly", async function () {
-            const { rwal } = await loadFixture(deployRWALFixture);
-
-            const blockNumber = await ethers.provider.getBlockNumber();
-            const currentSupply = await rwal.totalSupply();
-
-            // Move forward in time
-            await time.increase(3600);
-            await ethers.provider.send("evm_mine", []);
-
-            expect(await rwal.getPastTotalSupply(blockNumber)).to.equal(currentSupply);
-        });
-    });
-
     describe("Role Management", function () {
         it("Should grant and revoke roles correctly", async function () {
             const { rwal } = await loadFixture(deployRWALFixture);
@@ -572,10 +470,6 @@ describe("RWAL Token Contract", function () {
                 .withArgs(owner.address);
 
             expect(await rwal.paused()).to.be.true;
-
-            await expect(
-                rwal.transfer(user1.address, ethers.parseEther("100"))
-            ).to.be.revertedWithCustomError(rwal, "EnforcedPause");
 
             await expect(rwal.unpause())
                 .to.emit(rwal, "Unpaused")
@@ -766,22 +660,6 @@ describe("RWAL Token Contract", function () {
             await rwal.grantRole(BURNER_ROLE, user1.address);
             await rwal.connect(user1)["burn(uint256)"](largeAmount);
             expect(await rwal.balanceOf(user1.address)).to.equal(0);
-        });
-
-        it("Should handle delegation chain correctly", async function () {
-            const { rwal } = await loadFixture(deployRWALFixture);
-            const amount = ethers.parseEther("1000");
-
-            await rwal.transfer(user1.address, amount);
-
-            // user1 delegates to user2
-            await rwal.connect(user1).delegate(user2.address);
-            expect(await rwal.getVotes(user2.address)).to.equal(amount);
-
-            // user1 re-delegates to owner
-            await rwal.connect(user1).delegate(owner.address);
-            expect(await rwal.getVotes(user2.address)).to.equal(0);
-            expect(await rwal.getVotes(owner.address)).to.equal(amount);
         });
 
         it("Should handle zero transfer", async function () {

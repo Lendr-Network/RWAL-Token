@@ -51,10 +51,10 @@ async function main() {
   const preMint =  ethers.parseUnits("100000000", 18);
   // const preMint =  0;
   const defaultAdmin = "0xBE7a1Fba3F1F7e273Ab67208B5E841693631a723"; 
-
+  const launchPhaseActive = true;
   const erc20 = await upgrades.deployProxy(
     Rwal,
-    [name, symbol, defaultAdmin, preMint, decimals],
+    [name, symbol, defaultAdmin, preMint, decimals, launchPhaseActive],
     { 
             kind: 'uups',
             initializer: 'initialize'

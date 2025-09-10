@@ -7,9 +7,9 @@ import {IBurnMintERC20Upgradeable} from "mock/src/v0.8/shared/token/ERC20/upgrad
 import {AccessControlDefaultAdminRulesUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
 import {Initializable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/proxy/utils/UUPSUpgradeable.sol";
-import {ERC20VotesUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import {ERC20Upgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/token/ERC20/ERC20Upgradeable.sol";
 import {PausableUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/utils/PausableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "mock/src/v0.8/vendor/openzeppelin-solidity-upgradeable/v5.0.2/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IAccessControl} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contracts/access/IAccessControl.sol";
 import {IERC20} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contracts/interfaces/IERC20.sol";
 import {IERC165} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contracts/utils/introspection/IERC165.sol";
@@ -20,45 +20,54 @@ import {IERC165} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contrac
 contract RWAL is
     Initializable,
     UUPSUpgradeable,
+    ERC20Upgradeable,
     IBurnMintERC20Upgradeable,
     IGetCCIPAdmin,
     IERC165,
-    ERC20VotesUpgradeable,
     PausableUpgradeable,
+    ReentrancyGuardUpgradeable,
     AccessControlDefaultAdminRulesUpgradeable
 {
     // ================================================================
     // │                           CONSTANTS                          │
     // ================================================================
 
-    /// @dev Maximum supply of RWAL tokens (100M)
-    uint256 private constant MAX_SUPPLY = 100_000_000e18; //private
+    /// @dev Maximum supply of RWAL tokens (1 billion tokens with 18 decimals)
+    uint256 public constant MAX_SUPPLY = 1_000_000_000e18;
 
     // ================================================================
     // │                            ROLES                             │
     // ================================================================
-
+    bool public launchPhaseActive;
+    mapping(address => bool) public launchPhaseWhitelist;
+    bytes32 public constant LAUNCH_MANAGER_ROLE =
+        keccak256("LAUNCH_MANAGER_ROLE");
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+    bytes32 public constant BRIDGE_ROLE = keccak256("BRIDGE_ROLE");
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     // ================================================================
     // │                           ERRORS                             │
     // ================================================================
-    
-    // check the flow
-    error RWAL__MaxSupplyExceeded(uint256 supplyAfterMint); 
+
+    error RWAL__MaxSupplyExceeded(uint256 supplyAfterMint);
     error RWAL__InvalidRecipient(address recipient);
     error RWAL__ZeroAmount();
     error RWAL__ZeroAddress();
     error RWAL__InvalidUpgrade();
+    error RWAL__LaunchPhaseInactive();
+    error RWAL__NotWhitelisted();
+    error RWAL__AlreadyDeactivated();
 
     // ================================================================
     // │                           EVENTS                             │
     // ================================================================
 
+    event LaunchPhaseActivated();
+    event LaunchPhaseDeactivated();
     event CCIPAdminTransferred(
         address indexed previousAdmin,
         address indexed newAdmin
@@ -71,6 +80,10 @@ contract RWAL is
     event UpgradeAuthorized(
         address indexed newImplementation,
         address indexed authorizer
+    );
+    event LaunchPhaseWhitelistUpdated(
+        address indexed account,
+        bool whitelisted
     );
 
     // ================================================================
@@ -106,16 +119,17 @@ contract RWAL is
         string memory symbol,
         address admin,
         uint256 preMint,
-        uint8 decimals_
+        uint8 decimals_,
+        bool _launchPhaseActive
     ) public initializer {
         if (admin == address(0)) revert RWAL__ZeroAddress();
         if (preMint > MAX_SUPPLY) revert RWAL__MaxSupplyExceeded(preMint);
 
         // FIXED: Call initializers in the correct linearized order
-        __ERC20_init(name, symbol);
-        __EIP712_init(name, "1");
-        __Pausable_init();
         __AccessControlDefaultAdminRules_init(0, admin);
+        __ERC20_init(name, symbol);
+        __Pausable_init();
+        __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
 
         s_ccipAdmin = admin;
@@ -124,8 +138,18 @@ contract RWAL is
         _grantRole(MINTER_ROLE, admin);
         _grantRole(BURNER_ROLE, admin);
         _grantRole(UPGRADER_ROLE, admin);
+        _grantRole(BRIDGE_ROLE, admin);
         _grantRole(ADMIN_ROLE, admin);
         _grantRole(EMERGENCY_ROLE, admin);
+
+        // LAUNCH PHASE INIT
+        launchPhaseActive = _launchPhaseActive;
+        _grantRole(LAUNCH_MANAGER_ROLE, admin);
+        if (_launchPhaseActive) {
+            launchPhaseWhitelist[admin] = true;
+            emit LaunchPhaseWhitelistUpdated(admin, true);
+            emit LaunchPhaseActivated();
+        }
 
         // Pre-mint initial supply if specified
         if (preMint > 0) {
@@ -140,6 +164,46 @@ contract RWAL is
     modifier nonZeroAmount(uint256 amount) {
         if (amount == 0) revert RWAL__ZeroAmount();
         _;
+    }
+
+    // ================================================================
+    // |                    LAUNCH-PHASE MANAGEMENT                   |
+    // ================================================================
+
+    function setLaunchPhaseWhitelist(
+        address account,
+        bool whitelisted
+    ) external onlyRole(LAUNCH_MANAGER_ROLE) {
+        if (!launchPhaseActive) revert RWAL__LaunchPhaseInactive();
+        if (account == address(0)) revert RWAL__ZeroAddress();
+        launchPhaseWhitelist[account] = whitelisted;
+        emit LaunchPhaseWhitelistUpdated(account, whitelisted);
+    }
+
+    /// @notice Batch add or remove addresses to the launch-phase whitelist
+         function batchSetLaunchPhaseWhitelist(
+         address[] calldata accounts,
+         bool[] calldata whitelisted
+     ) external onlyRole(LAUNCH_MANAGER_ROLE) {
+         if (!launchPhaseActive) revert RWAL__LaunchPhaseInactive();
+         uint256 len = accounts.length;
+         if (len != whitelisted.length) revert RWAL__ZeroAddress(); 
+         if (len == 0) revert RWAL__ZeroAmount();
+         
+         for (uint256 i; i < len; ) {
+             address account = accounts[i];
+             if (account == address(0)) revert RWAL__ZeroAddress();
+             launchPhaseWhitelist[account] = whitelisted[i];
+             emit LaunchPhaseWhitelistUpdated(account, whitelisted[i]);
+             unchecked { ++i; }
+         }
+     }
+
+
+    function deactivateLaunchPhase() external onlyRole(LAUNCH_MANAGER_ROLE) {
+        if (!launchPhaseActive) revert RWAL__AlreadyDeactivated();
+        launchPhaseActive = false;
+        emit LaunchPhaseDeactivated();
     }
 
     // ================================================================
@@ -173,15 +237,6 @@ contract RWAL is
     /// @dev Returns the max supply of the token
     function maxSupply() public pure virtual returns (uint256) {
         return MAX_SUPPLY;
-    }
-
-    /// @dev Override _update to handle ERC20Votes and pausing
-    function _update(
-        address from,
-        address to,
-        uint256 value
-    ) internal virtual override whenNotPaused {
-        super._update(from, to, value);
     }
 
     // ================================================================
@@ -313,43 +368,23 @@ contract RWAL is
     }
 
     // ================================================================
-    // │                      GOVERNANCE FEATURES                     │
+    // |            TRANSFER RESTRICTIONS OVERRIDE                    |
     // ================================================================
 
-    /// @notice Get current voting power of an account
-    function getVotes(address account) public view override returns (uint256) {
-        return super.getVotes(account);
-    }
+    /// @dev Override _update to handle pause and whitelist restrictions
+    function _update(
+        address from,
+        address to,
+        uint256 value
+    ) internal virtual override {
+        // First apply launch phase restrictions (before calling super)
+        if (from != address(0) && to != address(0) && launchPhaseActive) {
+            if (!launchPhaseWhitelist[from]) {
+                revert RWAL__NotWhitelisted();
+            }
+        }
 
-    /// @notice Get past voting power of an account at a specific timepoint
-    function getPastVotes(
-        address account,
-        uint256 timepoint
-    ) public view override returns (uint256) {
-        return super.getPastVotes(account, timepoint);
-    }
-
-    /// @notice Get past total supply at a specific timepoint
-    function getPastTotalSupply(
-        uint256 timepoint
-    ) public view override returns (uint256) {
-        return super.getPastTotalSupply(timepoint);
-    }
-
-    /// @notice Delegate voting power to another account
-    function delegate(address delegatee) public override {
-        super.delegate(delegatee);
-    }
-
-    /// @notice Delegate voting power via signature
-    function delegateBySig(
-        address delegatee,
-        uint256 nonce,
-        uint256 expiry,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) public override {
-        super.delegateBySig(delegatee, nonce, expiry, v, r, s);
+        // Call parent _update (handles pause via whenNotPaused modifier)
+        super._update(from, to, value);
     }
 }

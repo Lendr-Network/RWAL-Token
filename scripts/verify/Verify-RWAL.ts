@@ -47,7 +47,8 @@ async function main(): Promise<void> {
     "0xBE7a1Fba3F1F7e273Ab67208B5E841693631a723", // defaultAdmin
     // ethers.parseUnits("100000000", 18),      // preMint\
     0,
-    18                                       // decimals
+    18,
+    true                                       // decimals
   ];
   
   // BurnMintTokenPool constructor arguments (from your deployment script)
