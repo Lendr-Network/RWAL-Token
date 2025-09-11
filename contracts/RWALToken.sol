@@ -15,7 +15,7 @@ import {IERC20} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contract
 import {IERC165} from "mock/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contracts/utils/introspection/IERC165.sol";
 
 /// @title RWAL - Lendr Governance & Utility Token
-/// @notice 100M fixed supply governance token with Chainlink CCT bridging
+/// @notice 1 billion fixed supply governance token with Chainlink CCT bridging
 /// @dev Implements ERC20Votes for governance, CCT for cross-chain bridging
 contract RWAL is
     Initializable,
